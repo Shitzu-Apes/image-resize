@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["esnext", "webworker"],
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["@cloudflare/workers-types"]
+  }
+}
