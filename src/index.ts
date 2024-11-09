@@ -1,119 +1,183 @@
-import decodeJpeg, { init as initJpegDecWasm } from "@jsquash/jpeg/decode";
-import decodePng, { init as initPngDecWasm } from "@jsquash/png/decode";
-import decodeWebp, { init as initWebpDecWasm } from "@jsquash/webp/decode";
-import encodeWebp, { init as initWebpEncWasm } from "@jsquash/webp/encode";
-import resize, { initResize } from "@jsquash/resize";
+import { convertImage } from "./lib/image";
+import { z } from "zod";
+import dotenv from "dotenv";
 
-// @ts-ignore
-import JPEG_DEC_WASM from "../node_modules/@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm";
-// @ts-ignore
-import PNG_DEC_WASM from "../node_modules/@jsquash/png/codec/pkg/squoosh_png_bg.wasm";
-// @ts-ignore
-import WEBP_DEC_WASM from "../node_modules/@jsquash/webp/codec/dec/webp_dec.wasm";
-// @ts-ignore
-import WEBP_ENC_WASM from "../node_modules/@jsquash/webp/codec/enc/webp_enc.wasm";
-// @ts-ignore
-import RESIZE_WASM from "../node_modules/@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm";
+dotenv.config();
 
-async function fetch(request: Request) {
-  const {
-    image,
-    width,
-    height,
-    fitMethod,
-  }: {
-    image?: string;
-    width?: number;
-    height?: number;
-    fitMethod?: "contain" | "stretch";
-  } = await request.json();
-  if (
-    !image ||
-    (fitMethod != null && !["contain", "stretch"].includes(fitMethod))
-  ) {
-    return new Response(null, { status: 400 });
+const { VITE_MEME_COOKING_CONTRACT_ID, ENDPOINT_SECRET } = process.env;
+
+import { createMemeToken } from "./lib/near";
+import { calculateReferenceHash, uploadToIPFS } from "./lib/ipfs";
+// import { createMemeToken } from "$lib/server/createMemeToken.js";
+// import { createMemeToken } from "$lib/server/createMemeToken.js";
+// import { calculateReferenceHash } from "$lib/util/cid.js";
+
+const CONTRACT_ID = VITE_MEME_COOKING_CONTRACT_ID;
+
+const teamAllocationSchema = z.object({
+  allocationBps: z.number(),
+  vestingDurationMs: z.number(),
+  cliffDurationMs: z.number(),
+});
+
+const referenceSchema = z.object({
+  description: z.string(),
+  twitterLink: z.string().optional().default(""),
+  telegramLink: z.string().optional().default(""),
+  website: z.string().optional().default(""),
+  image: z.string().optional(),
+});
+
+const createTokenSchema = z.object({
+  name: z.string().min(1),
+  symbol: z.string().min(1),
+  decimals: z.number().int().min(0),
+  durationMs: z.string(),
+  totalSupply: z.string(),
+  icon: z.string(),
+  softCap: z.string(),
+  hardCap: z.string().optional(),
+  teamAllocation: teamAllocationSchema.optional(),
+  reference: referenceSchema.optional(),
+});
+
+async function validateAuthHeader(request: Request) {
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new Error("Missing authorization header");
   }
-  const convertedImage = await convertImage(image, width, height);
-  return new Response(`data:image/webp;base64,${convertedImage}`);
+
+  const token = authHeader.split(" ")[1];
+  console.log("Token:", token, ENDPOINT_SECRET);
+  if (token !== ENDPOINT_SECRET) {
+    throw new Error("Invalid authorization token");
+  }
 }
 
-async function convertImage(
-  base64Icon: string,
-  width?: number,
-  height?: number,
-  fitMethod?: "contain" | "stretch"
-): Promise<string> {
-  // Remove data URL prefix to get raw base64
-  const base64Data = base64Icon.replace(/^data:image\/\w+;base64,/, "");
+async function parseAndValidateFormData(formData: FormData) {
+  const rawData = {
+    name: formData.get("name"),
+    symbol: formData.get("symbol"),
+    decimals: parseInt(formData.get("decimals") as string),
+    durationMs: formData.get("durationMs"),
+    totalSupply: formData.get("totalSupply"),
+    icon: formData.get("icon"),
+    softCap: formData.get("softCap"),
+    hardCap: formData.get("hardCap") || undefined,
+    teamAllocation: formData.get("teamAllocation")
+      ? JSON.parse(formData.get("teamAllocation") as string)
+      : undefined,
+    reference: formData.get("reference")
+      ? JSON.parse(formData.get("reference") as string)
+      : {
+          description: "",
+          twitterLink: "",
+          telegramLink: "",
+          website: "",
+        },
+  };
 
-  const imageBuffer = Uint8Array.from(
-    atob(base64Data.replace(/^data[^,]+,/, "")),
-    (v) => v.charCodeAt(0)
-  );
+  return createTokenSchema.parse(rawData);
+}
 
-  console.log("imageBuffer", base64Icon.slice(0, 100));
-  let sourceType: "jpeg" | "png" | "webp";
-  if (base64Icon.includes("image/png")) {
-    sourceType = "png";
-  } else if (base64Icon.includes("image/jpeg")) {
-    sourceType = "jpeg";
-  } else if (base64Icon.includes("image/webp")) {
-    sourceType = "webp";
-  } else {
-    throw new Error("Unsupported image format");
-  }
+export async function POST(request: Request) {
+  try {
+    await validateAuthHeader(request);
+    const formData = await request.formData();
+    const validatedData = await parseAndValidateFormData(formData);
 
-  const decodedImage = await decode(sourceType, imageBuffer);
+    const compressedImage = await convertImage(validatedData.icon);
+    const imageFile = compressedImage
+      ? await (async () => {
+          const base64Data = compressedImage.split(",")[1];
+          const mimeType = compressedImage
+            .split(",")[0]
+            .split(":")[1]
+            .split(";")[0];
 
-  await initResize(RESIZE_WASM);
-  let resizedImage;
-  if (width && height) {
-    resizedImage = await resize(decodedImage, {
-      width,
-      height,
-      fitMethod: fitMethod ?? "contain",
+          const buffer = Buffer.from(base64Data, "base64");
+
+          return new File([buffer], "icon", { type: mimeType });
+        })()
+      : null;
+
+    const { referenceCID, imageCID } = await uploadToIPFS({
+      imageFile,
+      imageCID: null,
+      referenceContent: JSON.stringify({
+        ...validatedData.reference,
+        image: "",
+      }),
     });
-  } else {
-    resizedImage = decodedImage;
+
+    const referenceHash = await calculateReferenceHash(
+      JSON.stringify({
+        ...validatedData.reference,
+        image: imageCID,
+      })
+    );
+
+    const icon = await convertImage(validatedData.icon, 96, 96);
+
+    const result = await createMemeToken(CONTRACT_ID!, {
+      ...validatedData,
+      icon,
+      referenceCID,
+      referenceHash,
+    });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        result,
+      }),
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("Error creating token:", error);
+    if (error instanceof z.ZodError) {
+      return new Response(
+        JSON.stringify({ success: false, error: error.errors }),
+        { status: 400 }
+      );
+    }
+    if (error instanceof Error && error.message.includes("authorization")) {
+      return new Response(
+        JSON.stringify({ success: false, error: error.message }),
+        { status: 401 }
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      { status: 500 }
+    );
   }
-
-  const encodedImage = await encode(resizedImage);
-  const base64String = btoa(
-    String.fromCharCode(...new Uint8Array(encodedImage))
-  );
-
-  return base64String;
 }
 
-async function decode(
-  sourceType: "jpeg" | "png" | "webp",
-  fileBuffer: Uint8Array
-) {
-  let result;
-  switch (sourceType) {
-    case "jpeg":
-      await initJpegDecWasm(JPEG_DEC_WASM);
-      result = await decodeJpeg(fileBuffer);
-      break;
-    case "png":
-      await initPngDecWasm(PNG_DEC_WASM);
-      result = decodePng(fileBuffer);
-      break;
-    case "webp":
-      await initWebpDecWasm(WEBP_DEC_WASM);
-      result = decodeWebp(fileBuffer);
-      break;
-    default:
-      throw new Error(`Unknown source type: ${sourceType}`);
-  }
-  return result;
-}
-
-async function encode(imageData: ImageData) {
-  await initWebpEncWasm(WEBP_ENC_WASM);
-  return encodeWebp(imageData);
-}
+// async function fetch(request: Request) {
+//   const {
+//     image,
+//     width,
+//     height,
+//     fitMethod,
+//   }: {
+//     image?: string;
+//     width?: number;
+//     height?: number;
+//     fitMethod?: "contain" | "stretch";
+//   } = await request.json();
+//   if (
+//     !image ||
+//     (fitMethod != null && !["contain", "stretch"].includes(fitMethod))
+//   ) {
+//     return new Response(null, { status: 400 });
+//   }
+//   return new Response(`data:image/webp;base64,${convertedImage}`);
+// }
 
 export default {
-  fetch,
+  fetch: POST,
 };
