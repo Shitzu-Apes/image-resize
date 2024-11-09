@@ -14,9 +14,10 @@ export async function calculateReferenceHash(
   return btoa(String.fromCharCode(...digest));
 }
 
-const { PINATA_JWT } = process.env;
-
-export async function pinFileToIPFS(file: File): Promise<{
+export async function pinFileToIPFS(
+  file: File,
+  PINATA_JWT: string
+): Promise<{
   IpfsHash: string;
   PinSize: number;
   Timestamp: string;
@@ -31,7 +32,14 @@ export async function pinFileToIPFS(file: File): Promise<{
     body: pinataForm,
   });
 
-  const json = await res.json();
+  const json = (await res.json()) as {
+    IpfsHash: string;
+    PinSize: number;
+    Timestamp: string;
+    error?: {
+      reason?: string;
+    };
+  };
   if (
     json.error &&
     json.error.reason &&
@@ -42,7 +50,10 @@ export async function pinFileToIPFS(file: File): Promise<{
   return json;
 }
 
-export async function pinJSONToIPFS(json: Record<string, unknown>): Promise<{
+export async function pinJSONToIPFS(
+  json: Record<string, unknown>,
+  PINATA_JWT: string
+): Promise<{
   IpfsHash: string;
   PinSize: number;
   Timestamp: string;
@@ -56,7 +67,14 @@ export async function pinJSONToIPFS(json: Record<string, unknown>): Promise<{
     body: JSON.stringify(json),
   });
 
-  const jsonRes = await res.json();
+  const jsonRes = (await res.json()) as {
+    IpfsHash: string;
+    PinSize: number;
+    Timestamp: string;
+    error?: {
+      details?: string;
+    };
+  };
   if (
     jsonRes.error &&
     jsonRes.error.details &&
@@ -71,22 +89,24 @@ export async function uploadToIPFS({
   imageFile,
   imageCID,
   referenceContent,
+  PINATA_JWT,
 }: {
   imageFile: File | null;
   imageCID: string | null;
   referenceContent: string;
+  PINATA_JWT: string;
 }) {
   if (!imageCID && !imageFile) {
     throw new Error("At least one of imageCID or imageFile is required");
   }
 
   if (!imageCID && imageFile) {
-    const { IpfsHash } = await pinFileToIPFS(imageFile);
+    const { IpfsHash } = await pinFileToIPFS(imageFile, PINATA_JWT);
     imageCID = IpfsHash;
   }
 
   const reference = { ...JSON.parse(referenceContent), image: imageCID };
-  const { IpfsHash: referenceCID } = await pinJSONToIPFS(reference);
+  const { IpfsHash: referenceCID } = await pinJSONToIPFS(reference, PINATA_JWT);
 
   return {
     imageCID,

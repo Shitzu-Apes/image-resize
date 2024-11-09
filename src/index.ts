@@ -1,18 +1,19 @@
 import { convertImage } from "./lib/image";
 import { z } from "zod";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const { VITE_MEME_COOKING_CONTRACT_ID, ENDPOINT_SECRET } = process.env;
 
 import { createMemeToken } from "./lib/near";
 import { calculateReferenceHash, uploadToIPFS } from "./lib/ipfs";
-// import { createMemeToken } from "$lib/server/createMemeToken.js";
-// import { createMemeToken } from "$lib/server/createMemeToken.js";
-// import { calculateReferenceHash } from "$lib/util/cid.js";
 
-const CONTRACT_ID = VITE_MEME_COOKING_CONTRACT_ID;
+export interface Env {
+  ENDPOINT_SECRET: string;
+  NODE_URL: string;
+  NETWORK_ID: string;
+  PRIVATE_KEY: string;
+  ACCOUNT_ID: string;
+  PINATA_JWT: string;
+  CONTRACT_ID: string;
+  WRAP_NEAR_CONTRACT_ID: string;
+}
 
 const teamAllocationSchema = z.object({
   allocationBps: z.number(),
@@ -41,7 +42,8 @@ const createTokenSchema = z.object({
   reference: referenceSchema.optional(),
 });
 
-async function validateAuthHeader(request: Request) {
+async function validateAuthHeader(request: Request, env: Env) {
+  const { ENDPOINT_SECRET } = env;
   const authHeader = request.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new Error("Missing authorization header");
@@ -55,6 +57,18 @@ async function validateAuthHeader(request: Request) {
 }
 
 async function parseAndValidateFormData(formData: FormData) {
+  const referenceInput = formData.get("reference")
+    ? JSON.parse(formData.get("reference") as string)
+    : undefined;
+
+  const reference = {
+    description: referenceInput?.description,
+    twitterLink: referenceInput?.twitterLink,
+    telegramLink: referenceInput?.telegramLink,
+    website: referenceInput?.website,
+    image: referenceInput?.image,
+  };
+
   const rawData = {
     name: formData.get("name"),
     symbol: formData.get("symbol"),
@@ -67,37 +81,32 @@ async function parseAndValidateFormData(formData: FormData) {
     teamAllocation: formData.get("teamAllocation")
       ? JSON.parse(formData.get("teamAllocation") as string)
       : undefined,
-    reference: formData.get("reference")
-      ? JSON.parse(formData.get("reference") as string)
-      : {
-          description: "",
-          twitterLink: "",
-          telegramLink: "",
-          website: "",
-        },
+    reference,
   };
 
   return createTokenSchema.parse(rawData);
 }
 
-export async function POST(request: Request) {
+export async function fetch(request: Request, env: Env) {
   try {
-    await validateAuthHeader(request);
+    await validateAuthHeader(request, env);
     const formData = await request.formData();
     const validatedData = await parseAndValidateFormData(formData);
 
     const compressedImage = await convertImage(validatedData.icon);
     const imageFile = compressedImage
       ? await (async () => {
-          const base64Data = compressedImage.split(",")[1];
-          const mimeType = compressedImage
-            .split(",")[0]
-            .split(":")[1]
-            .split(";")[0];
+          const base64Data = compressedImage;
+          const byteString = atob(base64Data.split(",")[1]);
+          const mimeType = base64Data.split(",")[0].split(":")[1].split(";")[0];
 
-          const buffer = Buffer.from(base64Data, "base64");
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+          }
 
-          return new File([buffer], "icon", { type: mimeType });
+          return new File([ab], "icon", { type: mimeType });
         })()
       : null;
 
@@ -108,6 +117,7 @@ export async function POST(request: Request) {
         ...validatedData.reference,
         image: "",
       }),
+      PINATA_JWT: env.PINATA_JWT,
     });
 
     const referenceHash = await calculateReferenceHash(
@@ -119,12 +129,16 @@ export async function POST(request: Request) {
 
     const icon = await convertImage(validatedData.icon, 96, 96);
 
-    const result = await createMemeToken(CONTRACT_ID!, {
-      ...validatedData,
-      icon,
-      referenceCID,
-      referenceHash,
-    });
+    const result = await createMemeToken(
+      env.CONTRACT_ID,
+      {
+        ...validatedData,
+        icon,
+        referenceCID,
+        referenceHash,
+      },
+      env
+    );
 
     return new Response(
       JSON.stringify({
@@ -157,27 +171,6 @@ export async function POST(request: Request) {
   }
 }
 
-// async function fetch(request: Request) {
-//   const {
-//     image,
-//     width,
-//     height,
-//     fitMethod,
-//   }: {
-//     image?: string;
-//     width?: number;
-//     height?: number;
-//     fitMethod?: "contain" | "stretch";
-//   } = await request.json();
-//   if (
-//     !image ||
-//     (fitMethod != null && !["contain", "stretch"].includes(fitMethod))
-//   ) {
-//     return new Response(null, { status: 400 });
-//   }
-//   return new Response(`data:image/webp;base64,${convertedImage}`);
-// }
-
 export default {
-  fetch: POST,
+  fetch: fetch,
 };

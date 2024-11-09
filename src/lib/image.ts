@@ -5,15 +5,15 @@ import encodeWebp, { init as initWebpEncWasm } from "@jsquash/webp/encode";
 import resize, { initResize } from "@jsquash/resize";
 
 // @ts-ignore
-import JPEG_DEC_WASM from "../node_modules/@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm";
+import JPEG_DEC_WASM from "../../node_modules/@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm";
 // @ts-ignore
-import PNG_DEC_WASM from "../node_modules/@jsquash/png/codec/pkg/squoosh_png_bg.wasm";
+import PNG_DEC_WASM from "../../node_modules/@jsquash/png/codec/pkg/squoosh_png_bg.wasm";
 // @ts-ignore
-import WEBP_DEC_WASM from "../node_modules/@jsquash/webp/codec/dec/webp_dec.wasm";
+import WEBP_DEC_WASM from "../../node_modules/@jsquash/webp/codec/dec/webp_dec.wasm";
 // @ts-ignore
-import WEBP_ENC_WASM from "../node_modules/@jsquash/webp/codec/enc/webp_enc.wasm";
+import WEBP_ENC_WASM from "../../node_modules/@jsquash/webp/codec/enc/webp_enc.wasm";
 // @ts-ignore
-import RESIZE_WASM from "../node_modules/@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm";
+import RESIZE_WASM from "../../node_modules/@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm";
 
 export async function convertImage(
   base64Icon: string,
@@ -22,7 +22,7 @@ export async function convertImage(
   fitMethod?: "contain" | "stretch"
 ): Promise<string> {
   // Remove data URL prefix to get raw base64
-  const base64Data = base64Icon.replace(/^data:image\/\w+;base64,/, "");
+  const base64Data = base64Icon.replace(/^data:[^,]+,/, "");
 
   const imageBuffer = Uint8Array.from(
     atob(base64Data.replace(/^data[^,]+,/, "")),
@@ -60,7 +60,7 @@ export async function convertImage(
     String.fromCharCode(...new Uint8Array(encodedImage))
   );
 
-  return base64String;
+  return `data:image/webp;base64,${base64String}`;
 }
 
 async function decode(

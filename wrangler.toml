@@ -1,5 +1,18 @@
 name = "image-resize"
 main = "src/index.ts"
 compatibility_date = "2024-10-04"
+compatibility_flags = ["nodejs_compat"]
 
 routes = [{ pattern = "image.meme.cooking", custom_domain = true }]
+
+[vars]
+CONTRACT_ID = "factory.v10.meme-cooking.testnet"
+WRAP_NEAR_CONTRACT_ID = "wrap.testnet"
+NETWORK_ID = "testnet"
+NODE_URL = "https://rpc.testnet.near.org"
+
+[env.production.vars]
+CONTRACT_ID = "meme-cooking.near"
+WRAP_NEAR_CONTRACT_ID = "wrap.near"
+NETWORK_ID = "mainnet"
+NODE_URL = "https://rpc.mainnet.near.org"

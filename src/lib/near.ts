@@ -1,11 +1,6 @@
 import { KeyPair, connect, keyStores } from "near-api-js";
 import type { KeyPairString } from "near-api-js/lib/utils/key_pair";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const { NETWORK_ID, NODE_URL, PRIVATE_KEY, ACCOUNT_ID, WRAP_NEAR_CONTRACT_ID } =
-  process.env;
+import { Env } from "..";
 
 export async function viewWithNode<T>(
   node: string,
@@ -52,8 +47,6 @@ export async function viewWithNode<T>(
   }
 }
 
-const WALLET_PRIVATE_KEY = PRIVATE_KEY;
-
 export async function createMemeToken(
   contractId: string,
   params: {
@@ -72,27 +65,28 @@ export async function createMemeToken(
     };
     referenceCID: string;
     referenceHash: string;
-  }
+  },
+  env: Env
 ) {
-  const depositTokenId = WRAP_NEAR_CONTRACT_ID;
+  const depositTokenId = env.WRAP_NEAR_CONTRACT_ID;
 
   // Connect to NEAR
   const keyStore = new keyStores.InMemoryKeyStore();
-  const keyPair = KeyPair.fromString(WALLET_PRIVATE_KEY as KeyPairString);
-  await keyStore.setKey(NETWORK_ID!, ACCOUNT_ID!, keyPair);
+  const keyPair = KeyPair.fromString(env.PRIVATE_KEY as KeyPairString);
+  await keyStore.setKey(env.NETWORK_ID, env.ACCOUNT_ID, keyPair);
 
   const config = {
-    networkId: NETWORK_ID!,
+    networkId: env.NETWORK_ID,
     keyStore,
-    nodeUrl: NODE_URL!,
+    nodeUrl: env.NODE_URL,
   };
 
   const near = await connect(config);
-  const account = await near.account(ACCOUNT_ID!);
+  const account = await near.account(env.ACCOUNT_ID);
 
   // Calculate storage cost
   console.log("[createMemeToken]: Calculating storage cost", {
-    NODE_URL,
+    NODE_URL: env.NODE_URL,
     contractId,
     args: {
       sender_id: account.accountId,
@@ -110,7 +104,7 @@ export async function createMemeToken(
     },
   });
   const storageCost = await viewWithNode<string>(
-    NODE_URL!,
+    env.NODE_URL,
     contractId,
     "create_meme_storage_cost",
     {
@@ -129,7 +123,6 @@ export async function createMemeToken(
     }
   );
 
-  console.log("Storage cost:", storageCost);
   // Create meme token
   return await account.functionCall({
     contractId,
