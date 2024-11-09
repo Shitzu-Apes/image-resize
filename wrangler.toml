@@ -16,3 +16,7 @@ CONTRACT_ID = "meme-cooking.near"
 WRAP_NEAR_CONTRACT_ID = "wrap.near"
 NETWORK_ID = "mainnet"
 NODE_URL = "https://rpc.mainnet.near.org"
+
+[[env.production.routes]]
+pattern = "nf.meme.cooking"
+custom_domain = true
